@@ -1,7 +1,9 @@
 /**
  * Crypto utility functions for frontend
- * Uses Web Crypto API (industry standard)
+ * Uses Web Crypto API (industry standard) with QRNG integration
  */
+
+import qrng from './qrng';
 
 class CryptoService {
   constructor() {
@@ -83,11 +85,12 @@ class CryptoService {
   }
 
   /**
-   * Encrypt message
+   * Encrypt message (using QRNG for IV generation)
    */
   async encrypt(message, key) {
     try {
-      const iv = crypto.getRandomValues(new Uint8Array(12));
+      // Use QRNG for IV generation (quantum randomness)
+      const iv = await qrng.getRandomBytes(12);
       const encoder = new TextEncoder();
       const data = encoder.encode(message);
 

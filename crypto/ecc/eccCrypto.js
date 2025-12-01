@@ -1,9 +1,12 @@
 /**
- * ECC Cryptography Module using Web Crypto API
+ * ECC Cryptography Module using Web Crypto API with QRNG
  * Industry Standard: ECDH (Elliptic Curve Diffie-Hellman) for key exchange
  * Industry Standard: AES-GCM for symmetric encryption
  * Curve: P-256 (NIST standard)
+ * Enhanced with Quantum Random Number Generation
  */
+
+const qrng = require('../qrng/qrngService');
 
 class ECCCrypto {
   constructor() {
@@ -155,15 +158,16 @@ class ECCCrypto {
   }
 
   /**
-   * Encrypt message using AES-GCM
+   * Encrypt message using AES-GCM with QRNG IV
    * @param {string} message - Plain text message
    * @param {CryptoKey} key - AES encryption key
    * @returns {Promise<{ciphertext: string, iv: string}>} Encrypted data
    */
   async encrypt(message, key) {
     try {
-      // Generate random IV (Initialization Vector)
-      const iv = crypto.getRandomValues(new Uint8Array(12));
+      // Generate quantum random IV (Initialization Vector)
+      const ivArray = await qrng.getRandomBytes(12);
+      const iv = new Uint8Array(ivArray);
 
       // Encode message
       const encoder = new TextEncoder();

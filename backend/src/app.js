@@ -12,6 +12,7 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const messageRoutes = require('./routes/messages');
 const healthRoutes = require('./routes/health');
+const qrngRoutes = require('./routes/qrng');
 
 const app = express();
 
@@ -42,6 +43,7 @@ app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/qrng', qrngRoutes);
 
 // Metrics endpoint
 app.get('/metrics', async (req, res) => {
