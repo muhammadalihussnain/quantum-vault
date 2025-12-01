@@ -10,6 +10,7 @@ const redis = require('./database/redis');
 // Import routes
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
+const messageRoutes = require('./routes/messages');
 const healthRoutes = require('./routes/health');
 
 const app = express();
@@ -40,6 +41,7 @@ app.set('trust proxy', 1);
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/messages', messageRoutes);
 
 // Metrics endpoint
 app.get('/metrics', async (req, res) => {
