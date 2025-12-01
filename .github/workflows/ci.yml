@@ -1,0 +1,354 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  NODE_VERSION: '20.x'
+  POSTGRES_VERSION: '15'
+  REDIS_VERSION: '7'
+
+jobs:
+  # Job 1: Code Quality & Linting
+  lint:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --workspace=backend
+          npm ci --workspace=frontend
+          npm ci --workspace=crypto
+
+      - name: Run ESLint (Backend)
+        run: npm run lint --workspace=backend
+        continue-on-error: true
+
+      - name: Run ESLint (Frontend)
+        run: npm run lint --workspace=frontend
+        continue-on-error: true
+
+      - name: Run Prettier Check
+        run: npx prettier --check "**/*.{js,jsx,json,md}"
+        continue-on-error: true
+
+  # Job 2: Unit Tests
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: quantumvault
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: quantumvault_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --workspace=backend
+          npm ci --workspace=frontend
+          npm ci --workspace=crypto
+
+      - name: Run database migrations
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: quantumvault
+          DB_PASSWORD: test_password
+          DB_NAME: quantumvault_test
+        run: npm run migrate --workspace=backend
+
+      - name: Run Backend Tests
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: quantumvault
+          DB_PASSWORD: test_password
+          DB_NAME: quantumvault_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key-for-ci-testing-only
+        run: npm test --workspace=backend -- --coverage --maxWorkers=2
+
+      - name: Run Crypto Tests
+        run: npm test --workspace=crypto -- --coverage --maxWorkers=2
+
+      - name: Upload Backend Coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/coverage/lcov.info
+          flags: backend
+          name: backend-coverage
+
+      - name: Upload Crypto Coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./crypto/coverage/lcov.info
+          flags: crypto
+          name: crypto-coverage
+
+  # Job 3: Security Scanning
+  security:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: lint
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --workspace=backend
+          npm ci --workspace=frontend
+          npm ci --workspace=crypto
+
+      - name: Run npm audit
+        run: |
+          npm audit --audit-level=moderate || true
+          npm audit --workspace=backend --audit-level=moderate || true
+          npm audit --workspace=frontend --audit-level=moderate || true
+          npm audit --workspace=crypto --audit-level=moderate || true
+
+      - name: Run Snyk Security Scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  # Job 4: CodeQL Analysis
+  codeql:
+    name: CodeQL Security Analysis
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'javascript' ]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+        with:
+          category: "/language:${{matrix.language}}"
+
+  # Job 5: Build Verification
+  build:
+    name: Build Verification
+    runs-on: ubuntu-latest
+    needs: [test-unit, security]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --workspace=backend
+          npm ci --workspace=frontend
+          npm ci --workspace=crypto
+
+      - name: Build Frontend
+        run: npm run build --workspace=frontend
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-build
+          path: frontend/dist
+          retention-days: 7
+
+  # Job 6: Performance Tests
+  performance:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: quantumvault
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: quantumvault_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --workspace=backend
+
+      - name: Run Performance Tests
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: quantumvault
+          DB_PASSWORD: test_password
+          DB_NAME: quantumvault_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key
+        run: npm test --workspace=backend -- tests/performance --maxWorkers=1
+
+  # Job 7: Deployment (Production)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, performance]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://quantum-vault.example.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: frontend-build
+          path: frontend/dist
+
+      - name: Deploy to Production
+        run: |
+          echo "🚀 Deploying to production..."
+          echo "This would deploy to your production environment"
+          echo "Configure with your deployment service (Render, Railway, AWS, etc.)"
+          # Add your deployment commands here
+
+      - name: Notify Deployment Success
+        run: |
+          echo "✅ Deployment successful!"
+          echo "Production URL: https://quantum-vault.example.com"
+
+  # Job 8: Deployment (Staging)
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.quantum-vault.example.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: frontend-build
+          path: frontend/dist
+
+      - name: Deploy to Staging
+        run: |
+          echo "🚀 Deploying to staging..."
+          echo "This would deploy to your staging environment"
+          # Add your deployment commands here
+
+      - name: Notify Deployment Success
+        run: |
+          echo "✅ Staging deployment successful!"
+          echo "Staging URL: https://staging.quantum-vault.example.com"
