@@ -24,6 +24,9 @@ function Navbar() {
               <Link to="/dashboard" className="navbar-link">
                 Dashboard
               </Link>
+              <Link to="/chat" className="navbar-link">
+                Chat
+              </Link>
               <Link to="/profile" className="navbar-link">
                 Profile
               </Link>
