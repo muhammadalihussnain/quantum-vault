@@ -29,8 +29,8 @@ async function startServer() {
     app.set('io', io);
     app.set('socketHandler', socketHandler);
 
-    // Start server
-    httpServer.listen(PORT, () => {
+    // Start server on all network interfaces
+    httpServer.listen(PORT, '0.0.0.0', () => {
       console.log('');
       console.log('╔════════════════════════════════════════════════════════════╗');
       console.log('║           🔐 Quantum Vault API Server                      ║');
